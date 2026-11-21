@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ollama Chat — Local AI</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg-panel: #171a23;
+    --bg-input: #1e2230;
+    --bg-hover: #262b3d;
+    --border: #2a3042;
+    --text: #e6e9f0;
+    --text-dim: #9aa3b5;
+    --accent: #6c8cff;
+    --accent-hover: #869fff;
+    --danger: #ff5c6c;
+    --danger-hover: #ff7684;
+    --success: #3ddc84;
+    --user-bubble: #35507e;
+    --ai-bubble: #22273a;
+    --shadow: 0 8px 24px rgba(0,0,0,.45);
+  }
+  html[data-theme="light"] {
+    --bg: #f4f6fa;
+    --bg-panel: #ffffff;
+    --bg-input: #eef1f7;
+    --bg-hover: #e3e8f2;
+    --border: #d8deea;
+    --text: #1c2230;
+    --text-dim: #5d6a82;
+    --accent: #4b6fe8;
+    --accent-hover: #3a5ed6;
+    --danger: #e2455a;
+    --danger-hover: #c93249;
+    --success: #1fa860;
+    --user-bubble: #d7e3fb;
+    --ai-bubble: #eef1f7;
+    --shadow: 0 8px 24px rgba(30,40,70,.12);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: background .25s, color .25s;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 18px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin-right: 6px;
+    white-space: nowrap;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); flex-shrink: 0; transition: background .2s; }
+  .dot.on { background: var(--success); box-shadow: 0 0 8px var(--success); }
+  select, button, input[type="text"] {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+  }
+  select { padding: 7px 10px; min-width: 220px; cursor: pointer; }
+  button { padding: 7px 16px; cursor: pointer; font-weight: 500; transition: background .15s, border-color .15s; }
+  button:hover:not(:disabled) { background: var(--bg-hover); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #btnConnect { border-color: var(--accent); color: var(--accent); }
+  #btnConnect:hover:not(:disabled) { background: var(--accent); color: #fff; }
+  #btnDisconnect { border-color: var(--danger); color: var(--danger); }
+  #btnDisconnect:hover:not(:disabled) { background: var(--danger); color: #fff; }
+  #btnRefresh { padding: 7px 11px; }
+  #status {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 22px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    scroll-behavior: smooth;
+  }
+  .row { display: flex; width: 100%; }
+  .row.user { justify-content: flex-end; }
+  .row.ai { justify-content: flex-start; }
+  .bubble {
+    max-width: min(760px, 82%);
+    padding: 11px 15px;
+    border-radius: 14px;
+    line-height: 1.55;
+    font-size: 14.5px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  .row.user .bubble { background: var(--user-bubble); border-bottom-right-radius: 4px; }
+  .row.ai .bubble { background: var(--ai-bubble); border-bottom-left-radius: 4px; }
+  .stats {
+    max-width: min(760px, 82%);
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 2px 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .row.ai .col { display: flex; flex-direction: column; gap: 4px; max-width: min(760px, 82%); }
+  .row.ai .col .bubble, .row.ai .col .stats { max-width: 100%; }
+  .cursor { display: inline-block; width: 8px; height: 15px; background: var(--accent); vertical-align: text-bottom; animation: blink .9s infinite; border-radius: 2px; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .system-note { text-align: center; color: var(--text-dim); font-size: 13px; }
+  .system-note.error { color: var(--danger); }
+  footer {
+    padding: 14px 18px 16px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+  }
+  .input-wrap {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  #msgInput {
+    flex: 1;
+    resize: none;
+    padding: 11px 14px;
+    border-radius: 10px;
+    max-height: 160px;
+    min-height: 44px;
+    line-height: 1.45;
+    font: inherit;
+    color: var(--text);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    outline: none;
+  }
+  #msgInput:focus { border-color: var(--accent); }
+  #btnSend { background: var(--accent); color: #fff; border: 1px solid var(--accent); padding: 11px 20px; border-radius: 10px; }
+  #btnSend:hover:not(:disabled) { background: var(--accent-hover); }
+  #btnStop { background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 11px 18px; border-radius: 10px; }
+  #btnStop:hover:not(:disabled) { background: var(--danger); color: #fff; }
+  .hint { margin-top: 7px; font-size: 11.5px; color: var(--text-dim); text-align: center; }
+  #btnTheme {
+    padding: 6px 10px;
+    font-size: 15px;
+    line-height: 1;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🗨 Ollama Chat</h1>
+  <div class="dot" id="dot"></div>
+  <select id="modelSelect" title="Models available in Ollama"><option>Loading models…</option></select>
+  <button id="btnRefresh" title="Re-run ollama list">↻</button>
+  <button id="btnConnect">Connect</button>
+  <button id="btnDisconnect" disabled>Disconnect</button>
+  <button id="btnTheme" title="Toggle light / dark theme">🌙</button>
+  <span id="status">Not connected</span>
+</header>
+
+<div id="chat">
+  <div class="system-note">Pick a model, press <b>Connect</b>, and start chatting with your local AI.</div>
+</div>
+
+<footer>
+  <div class="input-wrap">
+    <textarea id="msgInput" rows="1" placeholder="Type a message…  (Enter to send, Shift+Enter for newline)"></textarea>
+    <button id="btnSend">Send</button>
+    <button id="btnStop" disabled>■ Stop</button>
+  </div>
+  <div class="hint">Runs fully offline against your local Ollama instance (default http://localhost:11434)</div>
+</footer>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const chatEl = $("chat"),
+      modelSelect = $("modelSelect"),
+      msgInput = $("msgInput"),
+      btnSend = $("btnSend"),
+      btnStop = $("btnStop"),
+      btnConnect = $("btnConnect"),
+      btnDisconnect = $("btnDisconnect"),
+      btnRefresh = $("btnRefresh"),
+      btnTheme = $("btnTheme"),
+      statusEl = $("status"),
+      dotEl = $("dot");
+
+const DEFAULT_URL = "http://localhost:11434";
+let ollamaUrl = DEFAULT_URL;
+let connected = false;
+let currentModel = null;
+let history = [];          // [{role, content}]
+let generating = false;
+let controller = null;     // AbortController for the active generation
+let activeStats = null;    // live token-rate tracker for current answer
+
+/* ---------- theme ---------- */
+const savedTheme = localStorage.getItem("oc-theme") || "dark";
+applyTheme(savedTheme);
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  btnTheme.textContent = t === "dark" ? "☀️" : "🌙";
+  localStorage.setItem("oc-theme", t);
+}
+btnTheme.addEventListener("click", () =>
+  applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+
+/* ---------- status helpers ---------- */
+function setStatus(text, ok) {
+  statusEl.textContent = text;
+  dotEl.classList.toggle("on", !!ok);
+}
+function setConnectedUI(on) {
+  connected = on;
+  btnConnect.disabled = on;
+  btnDisconnect.disabled = !on;
+  modelSelect.disabled = on;
+}
+
+/* ---------- model listing (equivalent of `ollama list`) ---------- */
+async function listModels() {
+  setStatus("Loading models…", false);
+  modelSelect.innerHTML = "";
+  try {
+    const res = await fetch(`${ollamaUrl}/api/tags`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const models = (data.models || []).sort((a, b) => a.name.localeCompare(b.name));
+    if (!models.length) {
+      modelSelect.appendChild(new Option("No models — run: ollama pull <model>", ""));
+      setStatus("No models installed", false);
+      btnConnect.disabled = true;
+      return;
+    }
+    for (const m of models) {
+      const size = m.size ? ` (${(m.size / 1e9).toFixed(1)} GB)` : "";
+      modelSelect.appendChild(new Option(m.name + size, m.name));
+    }
+    setStatus(`${models.length} model${models.length > 1 ? "s" : ""} available`, false);
+    btnConnect.disabled = connected;
+  } catch (err) {
+    modelSelect.appendChild(new Option("⚠ Cannot reach Ollama", ""));
+    btnConnect.disabled = true;
+    setStatus("Ollama unreachable — is it running?", false);
+    addNote(`Could not reach Ollama at ${ollamaUrl} (${err.message}). ` +
+      `Start it with \`ollama serve\`. If the page is opened from a file, also allow web access: ` +
+      `set the environment variable OLLAMA_ORIGINS=* and restart Ollama.`, true);
+  }
+}
+
+/* ---------- connect / disconnect ---------- */
+async function preloadModel(model) {
+  const res = await fetch(`${ollamaUrl}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, prompt: "", keep_alive: -1 })
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  await res.json();
+}
+
+btnConnect.addEventListener("click", async () => {
+  const model = modelSelect.value;
+  if (!model) return;
+  currentModel = model;
+  setStatus(`Loading “${model}” into memory…`, false);
+  btnConnect.disabled = true;
+  try {
+    await preloadModel(model);
+    setConnectedUI(true);
+    setStatus(`Connected to ${model}`, true);
+    addNote(`Connected to <b>${model}</b>.`);
+  } catch (err) {
+    setStatus("Connection failed", false);
+    btnConnect.disabled = false;
+    addNote(`Failed to load “${model}”: ${err.message}`, true);
+  }
+});
+
+btnDisconnect.addEventListener("click", async () => {
+  const model = currentModel;
+  setStatus(`Unloading “${model}” from memory…`, false);
+  try {
+    await fetch(`${ollamaUrl}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, prompt: "", keep_alive: 0 })
+    });
+    addNote(`Disconnected — model <b>${model}</b> unloaded from memory.`);
+  } catch (err) {
+    addNote(`Disconnect warning: ${err.message}`, true);
+  }
+  if (history.length) history = [];
+  currentModel = null;
+  setConnectedUI(false);
+  setStatus("Not connected", false);
+});
+
+btnRefresh.addEventListener("click", () => { if (!connected) listModels(); });
+
+/* ---------- chat UI helpers ---------- */
+function scrollDown() { chatEl.scrollTop = chatEl.scrollHeight; }
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function addUserBubble(text) {
+  const row = document.createElement("div");
+  row.className = "row user";
+  const b = document.createElement("div");
+  b.className = "bubble";
+  b.textContent = text;
+  row.appendChild(b);
+  chatEl.appendChild(row);
+  scrollDown();
+}
+function addAiBubble() {
+  const row = document.createElement("div");
+  row.className = "row ai";
+  const col = document.createElement("div");
+  col.className = "col";
+  const b = document.createElement("div");
+  b.className = "bubble";
+  const cur = document.createElement("span");
+  cur.className = "cursor";
+  b.appendChild(cur);
+  const stats = document.createElement("div");
+  stats.className = "stats";
+  stats.textContent = "Generating…";
+  col.appendChild(b);
+  col.appendChild(stats);
+  row.appendChild(col);
+  chatEl.appendChild(row);
+  scrollDown();
+  return { textEl: b, cursor: cur, statsEl: stats };
+}
+function addNote(html, isError) {
+  const n = document.createElement("div");
+  n.className = "system-note" + (isError ? " error" : "");
+  n.innerHTML = html;
+  chatEl.appendChild(n);
+  scrollDown();
+}
+
+/* ---------- token-rate tracking ---------- */
+function newStats() {
+  return { t0: null, lastT: 0, tokens: 0, rates: [] };
+}
+function recordTokens(st, n) {
+  if (n <= 0) return;
+  const now = performance.now();
+  if (st.t0 === null) { st.t0 = now; st.lastT = now; }
+  const dt = now - st.lastT;
+  st.tokens += n;
+  if (dt >= 5) {
+    st.rates.push(n / (dt / 1000));
+    st.lastT = now;
+  }
+}
+function liveLabel(st) {
+  if (!st.t0 || st.tokens === 0) return "Generating…";
+  const el = (st.lastT - st.t0) / 1000;
+  const avg = st.tokens / Math.max(el, 1e-6);
+  return `${st.tokens} tokens · ${avg.toFixed(1)} tok/s …`;
+}
+function finalizeStats(st, finalChunk, stopped) {
+  let avg, min, max;
+  if (finalChunk && finalChunk.eval_count > 0 && finalChunk.eval_duration > 0) {
+    avg = finalChunk.eval_count / (finalChunk.eval_duration / 1e9);
+  } else if (st.t0 && st.tokens > 0) {
+    avg = st.tokens / Math.max((st.lastT - st.t0) / 1000, 1e-6);
+  } else {
+    avg = 0;
+  }
+  const rates = st.rates.slice(1);
+  if (rates.length) {
+    min = Math.min(...rates);
+    max = Math.max(...rates);
+  } else {
+    min = max = avg;
+  }
+  const f = x => x.toFixed(1);
+  const head = stopped ? "⏹ stopped · " : "";
+  return `${head}Speed: min ${f(min)} · avg ${f(avg)} · max ${f(max)} tok/s` +
+         (st.tokens ? ` · ${st.tokens} tokens` : "");
+}
+
+/* ---------- streaming chat with stop ---------- */
+async function sendMessage(text) {
+  addUserBubble(text);
+  history.push({ role: "user", content: text });
+
+  const ui = addAiBubble();
+  generating = true;
+  btnSend.disabled = true;
+  btnStop.disabled = false;
+  controller = new AbortController();
+  const st = newStats();
+  activeStats = st;
+  let full = "";
+  let finalChunk = null;
+  let stopped = false;
+  let statsTimer = setInterval(() => { ui.statsEl.textContent = liveLabel(activeStats); }, 250);
+
+  try {
+    const res = await fetch(`${ollamaUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: currentModel, messages: history, stream: true }),
+      signal: controller.signal
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const data = JSON.parse(line);
+        if (data.message && data.message.content) {
+          const piece = data.message.content;
+          full += piece;
+          recordTokens(activeStats, 1);
+          ui.textEl.textContent = full;
+          scrollDown();
+        }
+        if (data.done) {
+          finalChunk = data;
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      stopped = true;
+    } else {
+      addNote(`Generation failed: ${err.message}`, true);
+    }
+  } finally {
+    clearInterval(statsTimer);
+    generating = false;
+    controller = null;
+    activeStats = null;
+    ui.cursor.remove();
+    btnSend.disabled = false;
+    btnStop.disabled = true;
+
+    if (full) {
+      history.push({ role: "assistant", content: full });
+      ui.textEl.textContent = full;
+    } else if (stopped) {
+      ui.textEl.textContent = "— generation stopped before any output —";
+    }
+    ui.statsEl.textContent = finalizeStats(st, finalChunk, stopped);
+    scrollDown();
+  }
+}
+
+/* ---------- input handling ---------- */
+btnSend.addEventListener("click", trySend);
+btnStop.addEventListener("click", () => { if (controller) controller.abort(); });
+msgInput.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    trySend();
+  }
+});
+function trySend() {
+  const text = msgInput.value.trim();
+  if (!text || generating) return;
+  if (!connected || !currentModel) {
+    addNote("Not connected — choose a model and press <b>Connect</b> first.", true);
+    return;
+  }
+  msgInput.value = "";
+  msgInput.style.height = "auto";
+  sendMessage(text);
+}
+msgInput.addEventListener("input", () => {
+  msgInput.style.height = "auto";
+  msgInput.style.height = Math.min(msgInput.scrollHeight, 160) + "px";
+});
+
+/* ---------- start ---------- */
+listModels();
+msgInput.focus();
+</script>
+</body>
+</html>
