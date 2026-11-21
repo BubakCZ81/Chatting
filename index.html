@@ -23,21 +23,21 @@
     --shadow: 0 8px 24px rgba(0,0,0,.45);
   }
   html[data-theme="light"] {
-    --bg: #f4f6fa;
-    --bg-panel: #ffffff;
-    --bg-input: #eef1f7;
-    --bg-hover: #e3e8f2;
-    --border: #d8deea;
-    --text: #1c2230;
-    --text-dim: #5d6a82;
-    --accent: #4b6fe8;
-    --accent-hover: #3a5ed6;
-    --danger: #e2455a;
-    --danger-hover: #c93249;
-    --success: #1fa860;
-    --user-bubble: #d7e3fb;
-    --ai-bubble: #eef1f7;
-    --shadow: 0 8px 24px rgba(30,40,70,.12);
+    --bg: #fdf6e3;
+    --bg-panel: #eee8d5;
+    --bg-input: #f6efdc;
+    --bg-hover: #e4dcc3;
+    --border: #d6cfb8;
+    --text: #586e75;
+    --text-dim: #93a1a1;
+    --accent: #268bd2;
+    --accent-hover: #1a76ba;
+    --danger: #dc322f;
+    --danger-hover: #bd2b28;
+    --success: #859900;
+    --user-bubble: #d9e5ee;
+    --ai-bubble: #eae3cf;
+    --shadow: 0 8px 24px rgba(88,110,117,.18);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -76,6 +76,14 @@
     outline: none;
   }
   select { padding: 7px 10px; min-width: 220px; cursor: pointer; }
+  #urlInput {
+    padding: 7px 10px;
+    width: 210px;
+    font-family: Consolas, "Cascade Mono", "Courier New", monospace;
+    font-size: 12.5px;
+    color: var(--text-dim);
+  }
+  #urlInput:focus { color: var(--text); border-color: var(--accent); }
   button { padding: 7px 16px; cursor: pointer; font-weight: 500; transition: background .15s, border-color .15s; }
   button:hover:not(:disabled) { background: var(--bg-hover); }
   button:disabled { opacity: .45; cursor: not-allowed; }
@@ -232,6 +240,7 @@
 
 <header>
   <h1>🗨 Ollama Chat</h1>
+  <input id="urlInput" title="Ollama server address — press Enter to apply" placeholder="http://localhost:11434" spellcheck="false">
   <div class="dot" id="dot"></div>
   <select id="modelSelect" title="Models available in Ollama"><option>Loading models…</option></select>
   <button id="btnRefresh" title="Re-run ollama list">↻</button>
@@ -287,7 +296,7 @@ const chatEl = $("chat"),
       dotEl = $("dot");
 
 const DEFAULT_URL = "http://localhost:11434";
-let ollamaUrl = DEFAULT_URL;
+let ollamaUrl = (localStorage.getItem("oc-url") || DEFAULT_URL).replace(/\/+$/, "");
 let connected = false;
 let currentModel = null;
 let history = [];          // [{role, content}]
@@ -296,7 +305,7 @@ let controller = null;     // AbortController for the active generation
 let activeStats = null;    // live token-rate tracker for current answer
 
 /* ---------- theme ---------- */
-const savedTheme = localStorage.getItem("oc-theme") || "dark";
+const savedTheme = localStorage.getItem("oc-theme") || "light";
 applyTheme(savedTheme);
 function applyTheme(t) {
   document.documentElement.setAttribute("data-theme", t);
@@ -881,6 +890,41 @@ termIn.addEventListener("keydown", e => {
     }
   }
 });
+
+/* ---------- configurable server address ---------- */
+const urlInput = $("urlInput");
+urlInput.value = ollamaUrl;
+async function applyServerUrl() {
+  let v = urlInput.value.trim().replace(/\/+$/, "");
+  if (!v) v = DEFAULT_URL;
+  if (!/^https?:\/\//.test(v)) v = "http://" + v;
+  urlInput.value = v;
+  if (v === ollamaUrl) return;
+  if (connected && currentModel) {
+    try {
+      await fetch(`${ollamaUrl}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: currentModel, prompt: "", keep_alive: 0 })
+      });
+    } catch (_) {}
+    if (history.length) history = [];
+    setConnectedUI(false);
+    currentModel = null;
+  }
+  ollamaUrl = v;
+  localStorage.setItem("oc-url", v);
+  addNote(`Ollama server set to <b>${escapeHtml(v)}</b> — reloading model list…`);
+  listModels();
+}
+urlInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    urlInput.blur();
+    applyServerUrl();
+  }
+});
+urlInput.addEventListener("change", applyServerUrl);
 
 listModels();
 msgInput.focus();

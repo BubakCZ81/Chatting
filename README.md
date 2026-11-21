@@ -39,7 +39,8 @@ A single-file, dependency-free chat app for your local Ollama instance. Modern d
 - **Chat window** with user / AI bubbles, streaming token-by-token output, and full message history sent as context.
 - **Send** (or press `Enter`; `Shift+Enter` adds a newline) and **■ Stop** — aborts generation mid-stream; partial output and its stats are kept.
 - **Tokens/sec stats** right below every AI bubble: **min · avg · max** tokens per second plus the token count. The average uses Ollama's own `eval_count` / `eval_duration` report for accuracy; min/max come from live streaming samples.
-- **Dark / light theme** toggle (remembered between sessions).
+- **Solarized Light theme** (default) with a dark theme toggle, remembered between sessions.
+- **Editable server address** — the URL field in the header holds the Ollama server (default `http://localhost:11434`); type a new address/port and press Enter to switch and reload the model list. Your choice is remembered, and switching servers unloads the model from the previous one.
 - **Toggleable terminal** below the chat — click the **⌨ Terminal** button in the header or the terminal bar itself to open/close it. Supports the real `ollama` command set (`ollama` prefix optional) plus `help`, `clear`, and `exit`:
 
   | Command | Action |
@@ -61,7 +62,7 @@ A single-file, dependency-free chat app for your local Ollama instance. Modern d
 
 ## Configuration
 
-- Ollama URL defaults to `http://localhost:11434` (the standard Ollama port). To change it, edit the `DEFAULT_URL` constant at the top of the `<script>` section in `index.html`.
+- **Ollama server address/port** is editable directly in the UI (URL field in the header). It defaults to `http://localhost:11434` and is saved in `localStorage` — just type e.g. `http://localhost:11500` and press Enter. If you clear the field, the default is restored. The stale constant `DEFAULT_URL` is only the fallback.
 
 ## Troubleshooting
 
