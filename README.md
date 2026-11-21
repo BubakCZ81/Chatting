@@ -1,0 +1,2 @@
+# Chatting
+Ollama chatting app
