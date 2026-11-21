@@ -40,6 +40,24 @@ A single-file, dependency-free chat app for your local Ollama instance. Modern d
 - **Send** (or press `Enter`; `Shift+Enter` adds a newline) and **■ Stop** — aborts generation mid-stream; partial output and its stats are kept.
 - **Tokens/sec stats** right below every AI bubble: **min · avg · max** tokens per second plus the token count. The average uses Ollama's own `eval_count` / `eval_duration` report for accuracy; min/max come from live streaming samples.
 - **Dark / light theme** toggle (remembered between sessions).
+- **Toggleable terminal** below the chat — click the **⌨ Terminal** button in the header or the terminal bar itself to open/close it. Supports the real `ollama` command set (`ollama` prefix optional) plus `help`, `clear`, and `exit`:
+
+  | Command | Action |
+  |---|---|
+  | `ollama list` | list models on disk |
+  | `ollama ps` | show models currently in memory |
+  | `ollama pull <model>` | download a model (live progress) |
+  | `ollama push <model>` | push a model to the registry (live progress) |
+  | `ollama rm <model>` | delete a model from disk |
+  | `ollama cp <src> <dst>` | copy a model |
+  | `ollama show <model>` | show modelfile, parameters, capabilities |
+  | `ollama run <model> <msg>` | one-shot generation with tok/s summary |
+  | `ollama stop <model>` | unload a model from memory |
+  | `ollama version` | show Ollama version |
+
+  Command history is available with ↑ / ↓.
+
+  Note: a web page cannot spawn a real system shell, so the terminal implements the `ollama` CLI command set directly against Ollama's HTTP API — which covers all model management. For a full shell, use your OS terminal alongside the app.
 
 ## Configuration
 

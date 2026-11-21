@@ -162,6 +162,70 @@
     font-size: 15px;
     line-height: 1;
   }
+  #btnTerminal.on {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  #terminal {
+    background: #0b0e14;
+    border-top: 1px solid var(--border);
+    font-family: Consolas, "Cascade Mono", "Courier New", monospace;
+    font-size: 13px;
+    flex-shrink: 0;
+    max-height: 42vh;
+    display: flex;
+    flex-direction: column;
+  }
+  #terminal.open { flex: 0 1 auto; }
+  #termHead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    color: #9aa3b5;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  #termHead .ttitle { font-weight: 600; color: #e6e9f0; }
+  #termHead .tsub { font-size: 11.5px; }
+  #termHead .ttoggle { margin-left: auto; }
+  #termBody {
+    display: none;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #terminal.open #termBody { display: flex; }
+  #termOut {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 14px;
+    color: #c8d0e0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.45;
+    min-height: 60px;
+  }
+  #termOut .t-err { color: #ff5c6c; }
+  #termOut .t-ok { color: #3ddc84; }
+  #termOut .t-dim { color: #6d7689; }
+  #termOut .t-cmd { color: #8ca4ff; }
+  #termLine {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 14px 9px;
+    flex-shrink: 0;
+  }
+  #termLine .tprompt { color: #3ddc84; white-space: nowrap; }
+  #termIn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #e6e9f0;
+    font: inherit;
+  }
 </style>
 </head>
 <body>
@@ -174,11 +238,27 @@
   <button id="btnConnect">Connect</button>
   <button id="btnDisconnect" disabled>Disconnect</button>
   <button id="btnTheme" title="Toggle light / dark theme">🌙</button>
+  <button id="btnTerminal" title="Open / close the Ollama terminal">⌨ Terminal</button>
   <span id="status">Not connected</span>
 </header>
 
 <div id="chat">
   <div class="system-note">Pick a model, press <b>Connect</b>, and start chatting with your local AI.</div>
+</div>
+
+<div id="terminal">
+  <div id="termHead" title="Click to open / close the terminal">
+    <span class="ttitle">⌨ Terminal</span>
+    <span class="tsub">ollama list · ps · pull · rm · cp · push · show · run · version</span>
+    <span class="ttoggle" id="termToggleLabel">open ▲</span>
+  </div>
+  <div id="termBody">
+    <div id="termOut"></div>
+    <div id="termLine">
+      <span class="tprompt">ollama&gt;</span>
+      <input id="termIn" autocomplete="off" spellcheck="false" placeholder="type a command — 'help' for the list">
+    </div>
+  </div>
 </div>
 
 <footer>
@@ -508,7 +588,300 @@ msgInput.addEventListener("input", () => {
   msgInput.style.height = Math.min(msgInput.scrollHeight, 160) + "px";
 });
 
-/* ---------- start ---------- */
+/* ---------- terminal ---------- */
+const termEl = $("terminal"),
+      termHead = $("termHead"),
+      termOut = $("termOut"),
+      termIn = $("termIn"),
+      btnTerminal = $("btnTerminal"),
+      termToggleLabel = $("termToggleLabel");
+let termOpen = false;
+let termWelcomed = false;
+const termHistory = [];
+let termHistIdx = -1;
+
+function setTerm(open) {
+  termOpen = open;
+  termEl.classList.toggle("open", open);
+  btnTerminal.classList.toggle("on", open);
+  termToggleLabel.textContent = open ? "close ▼" : "open ▲";
+  if (open) {
+    if (!termWelcomed) {
+      termWelcomed = true;
+      tprint("Ollama terminal ready — type 'help' to see available commands.", "t-dim");
+    }
+    termOut.scrollTop = termOut.scrollHeight;
+    termIn.focus();
+  }
+}
+btnTerminal.addEventListener("click", () => setTerm(!termOpen));
+termHead.addEventListener("click", () => setTerm(!termOpen));
+
+function tprint(text, cls) {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = text;
+  termOut.appendChild(line);
+  termOut.scrollTop = termOut.scrollHeight;
+  return line;
+}
+function fmtBytes(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + " GB";
+  if (n >= 1e6) return (n / 1e6).toFixed(0) + " MB";
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + " kB";
+  return n + " B";
+}
+function relTime(iso) {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (!isFinite(s)) return "";
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + " mins ago";
+  if (s < 86400) { const h = Math.floor(s / 3600); return h + (h === 1 ? " hour ago" : " hours ago"); }
+  const d = Math.floor(s / 86400);
+  return d + (d === 1 ? " day ago" : " days ago");
+}
+function pad(s, w) { s = String(s); return s.length >= w ? s + "  " : s + " ".repeat(w - s.length + 2); }
+
+async function fetchJson(url, opts) {
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+async function streamProgress(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "", cur = null, lastKey = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const s = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!s) continue;
+      const d = JSON.parse(s);
+      if (d.error) throw new Error(d.error);
+      const key = d.digest || d.status || "";
+      if (key !== lastKey) { cur = tprint(""); lastKey = key; }
+      if (d.total) {
+        const pct = ((d.completed || 0) / d.total * 100).toFixed(1);
+        cur.textContent = `${d.status} — ${pct}% (${fmtBytes(d.completed || 0)} / ${fmtBytes(d.total)})`;
+      } else {
+        cur.textContent = d.status || "…";
+      }
+      termOut.scrollTop = termOut.scrollHeight;
+    }
+  }
+}
+async function streamGenerate(res) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  const line = tprint("");
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const s = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!s) continue;
+      const d = JSON.parse(s);
+      if (d.error) throw new Error(d.error);
+      if (d.response) {
+        line.textContent += d.response;
+        termOut.scrollTop = termOut.scrollHeight;
+      }
+      if (d.done && d.eval_count > 0) {
+        line.textContent += `\n[${d.eval_count} tok in ${(d.eval_duration / 1e9).toFixed(1)}s — avg ${(d.eval_count / (d.eval_duration / 1e9)).toFixed(1)} tok/s]`;
+      }
+    }
+  }
+}
+
+async function maybeRefreshModels() {
+  if (!connected) await listModels();
+}
+
+async function termExec(raw) {
+  const input = raw.trim();
+  tprint(`ollama> ${input}`, "t-cmd");
+  if (!input) return;
+  termHistory.unshift(input);
+  termHistIdx = -1;
+  let parts = input.split(/\s+/);
+  let cmd = parts[0].toLowerCase();
+  if (cmd === "ollama") cmd = (parts[1] || "").toLowerCase(), parts = parts.slice(1);
+  const args = parts.slice(1);
+  try {
+    switch (cmd) {
+      case "help":
+        tprint([
+          "Commands (the 'ollama' prefix is optional):",
+          "  list                     list models on disk (= ollama list)",
+          "  ps                       show models currently in memory",
+          "  pull <model>             download a model from the registry",
+          "  rm <model>               delete a model from disk",
+          "  cp <src> <dst>           copy a model",
+          "  push <model>             push a model to the registry",
+          "  show <model>             show model info (modelfile, parameters…)",
+          "  run <model> <message>    one-shot generation (no interactive session here)",
+          "  stop <model>             unload a model from memory",
+          "  version                  show Ollama version",
+          "  clear                    clear the terminal",
+          "  exit | close             close the terminal",
+          "  help                     this list"
+        ].join("\n"));
+        break;
+      case "clear":
+        termOut.innerHTML = "";
+        break;
+      case "exit": case "close":
+        setTerm(false);
+        break;
+      case "version": {
+        const d = await fetchJson(`${ollamaUrl}/api/version`);
+        tprint(`ollama version is ${d.version}`, "t-ok");
+        break;
+      }
+      case "list": {
+        const d = await fetchJson(`${ollamaUrl}/api/tags`);
+        const ms = (d.models || []).sort((a, b) => a.name.localeCompare(b.name));
+        if (!ms.length) { tprint("no models installed — try: pull llama3.2", "t-dim"); break; }
+        tprint(pad("NAME", 30) + pad("ID", 14) + pad("SIZE", 10) + "MODIFIED");
+        for (const m of ms)
+          tprint(pad(m.name, 30) + pad((m.digest || "").slice(0, 12), 14) + pad(fmtBytes(m.size || 0), 10) + relTime(m.modified_at));
+        break;
+      }
+      case "ps": {
+        const d = await fetchJson(`${ollamaUrl}/api/ps`);
+        const ms = d.models || [];
+        if (!ms.length) { tprint("no models in memory — press Connect in the chat or run: run <model> <message>", "t-dim"); break; }
+        tprint(pad("NAME", 30) + pad("ID", 14) + pad("SIZE", 10) + pad("PROCESSOR", 16) + "UNTIL");
+        for (const m of ms) {
+          const pct = m.size ? Math.round((m.size_vram || 0) / m.size * 100) : 0;
+          tprint(pad(m.name, 30) + pad((m.digest || "").slice(0, 12), 14) + pad(fmtBytes(m.size || 0), 10) + pad(`${pct}% GPU/${100 - pct}% CPU`, 16) + (m.expires_at ? new Date(m.expires_at).toLocaleTimeString() : ""));
+        }
+        break;
+      }
+      case "pull": {
+        if (!args[0]) throw new Error("usage: pull <model>");
+        await streamProgress(`${ollamaUrl}/api/pull`, { model: args[0], stream: true });
+        tprint(`pulled '${args[0]}'`, "t-ok");
+        await maybeRefreshModels();
+        break;
+      }
+      case "push": {
+        if (!args[0]) throw new Error("usage: push <model>");
+        await streamProgress(`${ollamaUrl}/api/push`, { model: args[0], stream: true });
+        tprint(`pushed '${args[0]}'`, "t-ok");
+        break;
+      }
+      case "rm": {
+        if (!args[0]) throw new Error("usage: rm <model>");
+        const res = await fetch(`${ollamaUrl}/api/delete`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: args[0] })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+        tprint(`deleted '${args[0]}'`, "t-ok");
+        await maybeRefreshModels();
+        break;
+      }
+      case "cp": {
+        if (!args[0] || !args[1]) throw new Error("usage: cp <source> <destination>");
+        await fetchJson(`${ollamaUrl}/api/copy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: args[0], destination: args[1] })
+        });
+        tprint(`copied '${args[0]}' -> '${args[1]}'`, "t-ok");
+        await maybeRefreshModels();
+        break;
+      }
+      case "show": {
+        if (!args[0]) throw new Error("usage: show <model>");
+        const d = await fetchJson(`${ollamaUrl}/api/show`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: args[0] })
+        });
+        const out = [];
+        if (d.modelfile) out.push("# Modelfile\n" + d.modelfile.trim());
+        if (d.parameters) out.push("# Parameters\n" + d.parameters.trim());
+        if (d.capabilities) out.push("# Capabilities\n" + JSON.stringify(d.capabilities));
+        if (!out.length) out.push(JSON.stringify(d, null, 2).split("\n").slice(0, 60).join("\n"));
+        tprint(out.join("\n\n"));
+        break;
+      }
+      case "stop": {
+        if (!args[0]) throw new Error("usage: stop <model>");
+        await fetchJson(`${ollamaUrl}/api/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: args[0], prompt: "", keep_alive: 0 })
+        });
+        tprint(`unloaded '${args[0]}' from memory`, "t-ok");
+        break;
+      }
+      case "run": {
+        if (!args[0]) throw new Error("usage: run <model> <message>");
+        const prompt = args.slice(1).join(" ");
+        if (!prompt) {
+          tprint("note: no interactive session in the web terminal — use 'run <model> <message>' for a one-shot answer, or the chat above", "t-dim");
+          break;
+        }
+        const res = await fetch(`${ollamaUrl}/api/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: args[0], prompt, stream: true })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+        await streamGenerate(res);
+        await maybeRefreshModels();
+        break;
+      }
+      default:
+        tprint(`command not found: ${cmd} — type 'help'`, "t-err");
+    }
+  } catch (err) {
+    tprint(`error: ${err.message}`, "t-err");
+  }
+  termOut.scrollTop = termOut.scrollHeight;
+}
+
+termIn.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    const v = termIn.value;
+    termIn.value = "";
+    termExec(v);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (termHistIdx < termHistory.length - 1) {
+      termHistIdx++;
+      termIn.value = termHistory[termHistIdx];
+    }
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (termHistIdx > 0) {
+      termHistIdx--;
+      termIn.value = termHistory[termHistIdx];
+    } else {
+      termHistIdx = -1;
+      termIn.value = "";
+    }
+  }
+});
+
 listModels();
 msgInput.focus();
 </script>
